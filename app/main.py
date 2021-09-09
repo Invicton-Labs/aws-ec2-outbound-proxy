@@ -9,6 +9,7 @@ import shlex
 import stat
 import socket
 
+logging.basicConfig(level=logging.NOTSET)
 log = logging.getLogger()
 log.setLevel(logging.INFO)
 
@@ -155,7 +156,7 @@ if __name__ == '__main__':
 
             # Get the start time of the process
             ssh_start_time = time.time()
-            res = subprocess.run(ssh_command)
+            res = subprocess.run(ssh_command_split)
             # Check how long the process ran
             ssh_elapsed_seconds = time.time() - ssh_start_time
 
@@ -178,7 +179,6 @@ if __name__ == '__main__':
 
             # If it's failed too many times, try killing the port forward process and breaking out to retry it
             if ssh_fail_count >= 10:
-                p.kill()
                 break
 
             # For every unsuccessful connection in a row, sleep an additional second (linear back-off)
@@ -187,15 +187,18 @@ if __name__ == '__main__':
                 time.sleep(min(10, ssh_fail_count))
 
         port_forward_elapsed_seconds = time.time() - port_forward_start_time
-
-        stderr = p.stderr.read()
-        if p.returncode != 0 or stderr != b'':
-            if p.stderr is None:
-                p.stderr = b''
-            log.error('Session manager failed with exit code {} and stderr: {}'.format(
-                p.returncode, stderr.decode('utf-8')))
+        if p.returncode is None:
+            log.info('Killing port forward session manager to retry')
+            p.kill()
         else:
-            log.warn('Session manager exited')
+            stderr = p.stderr.read()
+            if p.returncode != 0 or stderr != b'':
+                if p.stderr is None:
+                    p.stderr = b''
+                log.error('Session manager failed with exit code {} and stderr: {}'.format(
+                    p.returncode, stderr.decode('utf-8')))
+            else:
+                log.warn('Session manager exited')
 
         # If it ran > 30 seconds, we'll consider that a successful session
         if port_forward_elapsed_seconds > 30:
