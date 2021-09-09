@@ -10,6 +10,7 @@ import stat
 import socket
 
 log = logging.getLogger()
+log.setLevel(logging.INFO)
 
 iot_cert_pem = os.environ['SECRET_IOT_CERT_PEM'].replace('\\n', '\n')
 iot_key_pem = os.environ['SECRET_IOT_KEY_PEM'].replace('\\n', '\n')
@@ -126,7 +127,7 @@ if __name__ == '__main__':
             }),
             'https://ssm.{}.amazonaws.com'.format(region)
         ]
-        print('Starting port forwarding session on local port {}...'.format(
+        log.info('Starting port forwarding session on local port {}...'.format(
             local_ssh_port))
         port_forward_start_time = time.time()
         p = subprocess.Popen(
@@ -136,14 +137,18 @@ if __name__ == '__main__':
         rpf_flags = ' '.join(['-R {}:{}:{}:{}'.format(r['local_host'], r['local_port'], r['remote_host'],
                                                       r['remote_port']) for r in config['remote_port_forwards']])
         # Create the SSH command
-        ssh_command = shlex.split("ssh -N -i '{}' -p {} {} -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no {}@localhost".format(
-            key_filename, local_ssh_port, rpf_flags, config['ssh_user']))
+        ssh_command = "ssh -N -i '{}' -p {} {} -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no {}@localhost".format(
+            key_filename, local_ssh_port, rpf_flags, config['ssh_user'])
+        ssh_command_split = shlex.split(ssh_command)
 
         # Give the port forwarding session a second to get started
         time.sleep(2)
+
         ssh_fail_count = 0
+
+        # As long as the port forwarding session is open, keep trying to reconnect the SSH tunnel
         while p.returncode is None:
-            print('Starting SSH with remote tunnel...')
+            log.info('Starting SSH using command: `{}`'.format(ssh_command))
 
             # Get the start time of the process
             ssh_start_time = time.time()
