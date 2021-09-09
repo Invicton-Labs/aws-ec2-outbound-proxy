@@ -18,9 +18,9 @@ region = os.environ['SECRET_REGION']
 config_param = os.environ['SECRET_SSM_CONFIG_PARAM']
 
 local_ssh_port = 2222
-cert_file = 'iot.crt'
-key_file = 'iot.key'
-key_filename = 'ssh-key-file.pem'
+cert_file = '/tmp/iot.crt'
+key_file = '/tmp/iot.key'
+key_filename = '/tmp/ssh-key-file.pem'
 
 retries = urllib3.Retry(connect=5, read=2, redirect=5)
 http = urllib3.PoolManager(
