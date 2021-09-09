@@ -7,6 +7,7 @@ import time
 import os
 import shlex
 import stat
+import socket
 
 log = logging.getLogger()
 
@@ -17,7 +18,6 @@ credentials_url = os.environ['SECRET_CREDENTIALS_URL']
 region = os.environ['SECRET_REGION']
 config_param = os.environ['SECRET_SSM_CONFIG_PARAM']
 
-local_ssh_port = 2222
 cert_file = '/tmp/iot.crt'
 key_file = '/tmp/iot.key'
 key_filename = '/tmp/ssh-key-file.pem'
@@ -53,6 +53,15 @@ def get_boto_session():
     return boto3.session.Session(aws_access_key_id=creds['accessKeyId'], aws_secret_access_key=creds['secretAccessKey'], aws_session_token=creds['sessionToken'], region_name=region)
 
 
+def get_open_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("", 0))
+    s.listen(1)
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
 if __name__ == '__main__':
     sess = get_boto_session()
     ssm_client = sess.client('ssm')
@@ -73,24 +82,24 @@ if __name__ == '__main__':
     # Set read/write for file owner only
     os.chmod(key_filename, stat.S_IRWXU)
 
-    ssh_command = shlex.split("ssh -N -i '{}' -p {} -R {}:{}:{} -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no {}@localhost".format(
-        key_filename, local_ssh_port, config['remote_port_forward_local_port'], config['remote_port_forward_remote_host'], config['remote_port_forward_remote_port'], config['ssh_user']))
-
-    target = config['rds_proxy_id']
-    document = 'AWS-StartPortForwardingSession'
-    parameters = {
-        'portNumber': [
-            str(config['ssh_port'])  # '5432',
-        ],
-        'localPortNumber': [
-            str(local_ssh_port)  # '5432'
-        ]
-    }
-
     # For tracking whether our processes are working properly
     port_forward_fail_count = 0
 
     while True:
+        # Get an available port number
+        local_ssh_port = get_open_port()
+
+        # Create the port forwarding command/parameters
+        target = config['rds_proxy_id']
+        document = 'AWS-StartPortForwardingSession'
+        parameters = {
+            'portNumber': [
+                str(config['ssh_port'])  # '5432',
+            ],
+            'localPortNumber': [
+                str(local_ssh_port)  # '5432'
+            ]
+        }
         # Start the EC2 session to the RDS proxy
         response = ssm_client.start_session(
             Target=target,
@@ -112,11 +121,21 @@ if __name__ == '__main__':
             }),
             'https://ssm.{}.amazonaws.com'.format(region)
         ]
-        print('Starting port forwarding session...')
+        print('Starting port forwarding session on local port {}...'.format(
+            local_ssh_port))
         port_forward_start_time = time.time()
         p = subprocess.Popen(
             port_forward_command, stderr=subprocess.PIPE)
 
+        # Create the remote port forward commands
+        rpf_flags = ' '.join(['-R {}:{}:{}'.format(r['local_port'], r['remote_host'],
+                                                   r['remote_port']) for r in config['remote_port_forwards']])
+        # Create the SSH command
+        ssh_command = shlex.split("ssh -N -i '{}' -p {} {} -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no {}@localhost".format(
+            key_filename, local_ssh_port, rpf_flags, config['ssh_user']))
+
+        # Give the port forwarding session a second to get started
+        time.sleep(2)
         ssh_fail_count = 0
         while p.returncode is None:
             print('Starting SSH with remote tunnel...')
@@ -156,11 +175,7 @@ if __name__ == '__main__':
 
         port_forward_elapsed_seconds = time.time() - port_forward_start_time
 
-        stdout = p.stdout.read()
         stderr = p.stderr.read()
-        # Print the process output
-        log.warn('Session manager exited with stdout: {}'.format(
-            stdout.decode('utf-8')))
         if p.returncode != 0 or stderr != b'':
             if p.stderr is None:
                 p.stderr = b''
