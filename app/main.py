@@ -111,6 +111,9 @@ if __name__ == '__main__':
         except Exception as e:
             log.error("Failed to create session with EC2 instance: {}".format(e))
             time.sleep(2)
+            # It might be a credentials error: try getting a new session and client
+            sess = get_boto_session()
+            ssm_client = sess.client('ssm')
             continue
 
         # Start the port forwarding to 22
