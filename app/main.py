@@ -100,12 +100,17 @@ if __name__ == '__main__':
                 str(local_ssh_port)  # '5432'
             ]
         }
-        # Start the EC2 session to the RDS proxy
-        response = ssm_client.start_session(
-            Target=target,
-            DocumentName=document,
-            Parameters=parameters
-        )
+        try:
+            # Start the EC2 session to the RDS proxy
+            response = ssm_client.start_session(
+                Target=target,
+                DocumentName=document,
+                Parameters=parameters
+            )
+        except Exception as e:
+            log.error("Failed to create session with EC2 instance: {}".format(e))
+            time.sleep(2)
+            continue
 
         # Start the port forwarding to 22
         port_forward_command = [
@@ -128,8 +133,8 @@ if __name__ == '__main__':
             port_forward_command, stderr=subprocess.PIPE)
 
         # Create the remote port forward commands
-        rpf_flags = ' '.join(['-R {}:{}:{}'.format(r['local_port'], r['remote_host'],
-                                                   r['remote_port']) for r in config['remote_port_forwards']])
+        rpf_flags = ' '.join(['-R {}:{}:{}:{}'.format(r['local_host'], r['local_port'], r['remote_host'],
+                                                      r['remote_port']) for r in config['remote_port_forwards']])
         # Create the SSH command
         ssh_command = shlex.split("ssh -N -i '{}' -p {} {} -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=no {}@localhost".format(
             key_filename, local_ssh_port, rpf_flags, config['ssh_user']))
